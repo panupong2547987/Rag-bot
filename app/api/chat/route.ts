@@ -297,6 +297,33 @@ function buildRetrievalQuery(userQuestion: string, history: ChatTurn[]) {
   return `${base}\n${userQuestion}`.trim()
 }
 
+// --- โค้ดที่เพิ่มใหม่ 1: ดักจับคำถามเกี่ยวกับหน้าเพจ ---
+function isPageUpdateIntent(text: string) {
+  const q = text.trim().toLowerCase()
+  return /เพจ|โพสต์|ประกาศล่าสุด|อัปเดตหน้าเพจ|เฟสบุ๊ค|facebook|ข่าวล่าสุด/.test(q)
+}
+
+// --- โค้ดที่เพิ่มใหม่ 2: ดึงข้อมูลจาก Facebook ---
+async function fetchFacebookPagePosts() {
+  const pageToken = process.env.FB_PAGE_TOKEN
+  if (!pageToken) return ""
+  try {
+    const res = await fetch(`https://graph.facebook.com/v19.0/me/posts?limit=3&access_token=${pageToken}`)
+    if (!res.ok) return ""
+    const data = await res.json()
+    if (data && data.data && data.data.length > 0) {
+      const posts = data.data
+        .filter((p: { message?: string; created_time: string }) => p.message)
+        .map((p: { message: string; created_time: string }) => `- ${p.message} (วันที่: ${new Date(p.created_time).toLocaleDateString("th-TH")})`)
+        .join("\n")
+      return `\n[ข้อมูลอัปเดตเรียลไทม์จากหน้าเพจ Facebook]\n${posts}`
+    }
+  } catch (err) {
+    console.error("Failed to fetch FB posts", err)
+  }
+  return ""
+}
+
 export async function POST(req: Request) {
   const { question, history, mode } = (await req.json()) as { question?: string; history?: ChatTurn[]; mode?: AnswerMode }
   const userQuestion = (question ?? "").trim()
@@ -515,6 +542,15 @@ export async function POST(req: Request) {
     : ""
 
   const context = docsForRanking.map(docToText).filter(Boolean).join("\n")
+
+  // --- โค้ดที่เพิ่มใหม่ 3: รวมข้อมูล Facebook เข้าไปใน Context ---
+  let fbPostsContext = ""
+  if (isPageUpdateIntent(userQuestion)) {
+    fbPostsContext = await fetchFacebookPagePosts()
+  }
+  const finalContext = [context, fbPostsContext].filter(Boolean).join("\n\n")
+  // --------------------------------------------------------
+
   const recentHistory = safeHistory
     .slice(-6)
     .map((turn) => `${turn.role === "user" ? "ผู้ใช้" : "ผู้ช่วย"}: ${turn.text}`)
@@ -538,7 +574,7 @@ ${outOfScopeRule}
 - โหมดคำตอบตอนนี้คือ: ${answerMode} (strict = เข้มที่สุด, balanced = ตรงข้อมูลแต่เป็นธรรมชาติ, chat = อธิบายเพิ่มได้)
 
 ข้อมูลอ้างอิง:
-${context || "ไม่มีข้อมูลอ้างอิงที่ match ได้"}
+${finalContext || "ไม่มีข้อมูลอ้างอิงที่ match ได้"}
 
 บริบทบทสนทนาก่อนหน้า:
 ${recentHistory || "ไม่มี"}
