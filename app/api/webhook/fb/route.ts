@@ -2,13 +2,10 @@ import { NextResponse } from "next/server"
 import { getEmbedding } from "@/app/lib/embedding"
 import { getSupabaseClient } from "@/app/lib/supabase"
 
-// ตั้งค่า Token ของ Facebook
-const FB_VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN ?? "my_custom_verify_token" // ตั้งให้ตรงกับช่อง Token การยืนยัน
-const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN // โทเค็นเพจสำหรับส่งข้อความกลับ
 
-// ==========================================
-// 1. GET: สำหรับ Facebook ยิงมายืนยันตัวตนตอนผูก Webhook
-// ==========================================
+const FB_VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN ?? "my_custom_verify_token" 
+const FB_ACCESS_TOKEN = process.env.FB_ACCESS_TOKEN 
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const mode = searchParams.get("hub.mode")
@@ -23,9 +20,7 @@ export async function GET(req: Request) {
   return new NextResponse("Forbidden", { status: 403 })
 }
 
-// ==========================================
-// 2. POST: รับข้อมูลจาก Facebook (แชท และ โพสต์หน้าเพจ)
-// ==========================================
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()

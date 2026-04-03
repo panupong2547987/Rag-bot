@@ -26,6 +26,7 @@ type ChatApiSuccessPayload = {
   fallbackUsed: boolean
   fallbackReason: string
   model: string
+  cacheHit?: boolean
 }
 
 const chatResponseCache = new ResponseCache<ChatApiSuccessPayload>()
@@ -297,32 +298,38 @@ function buildRetrievalQuery(userQuestion: string, history: ChatTurn[]) {
   return `${base}\n${userQuestion}`.trim()
 }
 
-// --- โค้ดที่เพิ่มใหม่ 1: ดักจับคำถามเกี่ยวกับหน้าเพจ ---
+// ------------------------------------------------------------
+// โค้ดดึงข้อมูล Facebook (เวอร์ชันไม่ติด Cache)
 function isPageUpdateIntent(text: string) {
   const q = text.trim().toLowerCase()
   return /เพจ|โพสต์|ประกาศล่าสุด|อัปเดตหน้าเพจ|เฟสบุ๊ค|facebook|ข่าวล่าสุด/.test(q)
 }
 
-// --- โค้ดที่เพิ่มใหม่ 2: ดึงข้อมูลจาก Facebook ---
 async function fetchFacebookPagePosts() {
-  const pageToken = process.env.FB_PAGE_TOKEN
-  if (!pageToken) return ""
+  const pageToken = process.env.FB_PAGE_TOKEN?.trim().replace(/\s+/g, '')
+  if (!pageToken) return "\n[ระบบส่วนตัวบอท: ดึงข้อมูลไม่ได้ เพราะหา Token ใน Vercel ไม่เจอครับ]"
+  
   try {
-    const res = await fetch(`https://graph.facebook.com/v19.0/me/posts?limit=3&access_token=${pageToken}`)
-    if (!res.ok) return ""
+    const res = await fetch(`https://graph.facebook.com/v19.0/me/posts?limit=3&access_token=${pageToken}`, { cache: 'no-store' })
+    if (!res.ok) {
+      const errText = await res.text()
+      return `\n[ระบบส่วนตัวบอท: ดึงข้อมูลไม่ได้ เฟสบุ๊คฟ้อง Error -> ${res.status} ${errText}]`
+    }
     const data = await res.json()
     if (data && data.data && data.data.length > 0) {
       const posts = data.data
-        .filter((p: { message?: string; created_time: string }) => p.message)
+        .filter((p: { message?: string }) => p.message)
         .map((p: { message: string; created_time: string }) => `- ${p.message} (วันที่: ${new Date(p.created_time).toLocaleDateString("th-TH")})`)
-        .join("\n")
+        .join("\n\n")
       return `\n[ข้อมูลอัปเดตเรียลไทม์จากหน้าเพจ Facebook]\n${posts}`
     }
-  } catch (err) {
-    console.error("Failed to fetch FB posts", err)
+    return "\n[ระบบส่วนตัวบอท: ดึงสำเร็จแล้ว แต่หน้าเพจยังไม่มีโพสต์อะไรเลย]"
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return `\n[ระบบส่วนตัวบอท: โค้ดพังตอนดึงข้อมูล -> ${msg}]`
   }
-  return ""
 }
+// ------------------------------------------------------------
 
 export async function POST(req: Request) {
   const { question, history, mode } = (await req.json()) as { question?: string; history?: ChatTurn[]; mode?: AnswerMode }
@@ -331,6 +338,9 @@ export async function POST(req: Request) {
   const retrievalQuery = buildRetrievalQuery(userQuestion, safeHistory)
   const chatScope = req.headers.get("x-chat-scope") === "user" ? "user" : "guest"
   const answerMode: AnswerMode = mode === "chat" ? "chat" : mode === "strict" ? "strict" : "balanced"
+  
+  // เช็คว่าถามเรื่องเพจไหม
+  const isPageIntent = isPageUpdateIntent(userQuestion)
 
   if (!userQuestion) {
     return Response.json({ error: "Missing question", fallbackReason: "invalid-request" }, { status: 400 })
@@ -339,7 +349,9 @@ export async function POST(req: Request) {
   const cacheTtlMs = Number(process.env.CHAT_RESPONSE_CACHE_TTL_MS ?? 60_000)
   const cacheKey = buildCacheKey(userQuestion, safeHistory)
   const cacheEnabled = chatScope === "guest" && process.env.ENABLE_CHAT_RESPONSE_CACHE === "true"
-  if (cacheEnabled) {
+  
+  // ปิดแคชถ้าถามเรื่องเพจ
+  if (cacheEnabled && !isPageIntent) {
     const cached = chatResponseCache.get(cacheKey)
     if (cached) {
       return Response.json({ ...cached, cacheHit: true })
@@ -373,7 +385,7 @@ export async function POST(req: Request) {
 
   const embedding = await getEmbedding(retrievalQuery)
 
-  // Multi-step retrieval: start strict, then relax threshold, then keyword fallback.
+  // Multi-step retrieval ของคุณแบบดั้งเดิม
   const retrievalPlans = [
     { threshold: 0.68, count: 3 },
     { threshold: 0.6, count: 5 },
@@ -400,6 +412,7 @@ export async function POST(req: Request) {
     }
   }
 
+  // Keyword fallback ของคุณแบบดั้งเดิม
   if (docs.length === 0) {
     const terms = uniqueTokens(retrievalQuery).filter((term) => term.length >= 2).slice(0, 6)
     if (terms.length > 0) {
@@ -417,7 +430,8 @@ export async function POST(req: Request) {
     }
   }
 
-  if (docs.length === 0 && answerMode === "strict") {
+  // Guardrail 1: ถ้าไม่เจอข้อมูลเลย
+  if (docs.length === 0 && answerMode === "strict" && !isPageIntent) {
     return Response.json({
       answer:
         "ผมหาข้อมูลที่ตรงเป๊ะในคลังความรู้ยังไม่เจอครับ แต่ช่วยต่อได้แน่นอน\nลองพิมพ์เพิ่มอีกนิดแบบนี้ได้เลย: ประเภทผู้กู้ (รายใหม่/รายเก่า), ภาคเรียน, หรือชื่อแบบฟอร์ม แล้วผมจะสรุปให้ตรงประเด็นทันที",
@@ -453,7 +467,8 @@ export async function POST(req: Request) {
       (sortedDocs.length === 1 || similarityGap >= similarityGapMin)
   )
 
-  if (answerMode === "strict" && topSimilarity < strictMinSimilarity) {
+  // Guardrail 2: ความมั่นใจต่ำ
+  if (answerMode === "strict" && topSimilarity < strictMinSimilarity && !isPageIntent) {
     const lastBotAnswer = getLatestBotAnswer(safeHistory)
     const followUpLike = isFollowUpQuestion(userQuestion)
     const cautionLike = isCautionIntent(userQuestion)
@@ -491,7 +506,8 @@ export async function POST(req: Request) {
     })
   }
 
-  if (answerMode === "strict" && topDoc && topSimilarity >= directAnswerThreshold && directAnswer && canLockAnswer) {
+  // ล็อกคำตอบ
+  if (answerMode === "strict" && topDoc && topSimilarity >= directAnswerThreshold && directAnswer && canLockAnswer && !isPageIntent) {
     const naturalDirectAnswer = makeDirectAnswerNatural(userQuestion, directAnswer)
     const payload: ChatApiSuccessPayload = {
       answer: naturalDirectAnswer,
@@ -507,7 +523,9 @@ export async function POST(req: Request) {
   }
 
   const maxSimilarity = Math.max(0, ...docs.map((doc) => doc.similarity ?? 0))
-  if (answerMode !== "strict" && maxSimilarity < softOutOfScopeSimilarity) {
+  
+  // Guardrail 3: นอกขอบเขตแบบซอฟต์
+  if (answerMode !== "strict" && maxSimilarity < softOutOfScopeSimilarity && !isPageIntent) {
     const suggestions = sortedDocs
       .slice(0, 3)
       .map((doc) => extractQuestionFromContent(doc.content))
@@ -526,7 +544,8 @@ export async function POST(req: Request) {
     })
   }
 
-  if (answerMode === "strict" && enableOutOfScopeGuardrail && isOutOfScopeQuestion(userQuestion, maxSimilarity)) {
+  // Guardrail 4: นอกขอบเขต
+  if (answerMode === "strict" && enableOutOfScopeGuardrail && isOutOfScopeQuestion(userQuestion, maxSimilarity) && !isPageIntent) {
     return Response.json({
       answer:
         "คำถามนี้อาจเลยขอบเขตที่ระบบนี้ดูแลอยู่ครับ แต่ผมยังช่วยปรับคำถามให้ใกล้กับข้อมูลที่มีได้\nระบบนี้ถนัดเรื่อง กยศ / การกู้ยืม / ระเบียบนิสิต / ข้อมูลภายในมหาวิทยาลัย",
@@ -537,24 +556,27 @@ export async function POST(req: Request) {
     })
   }
 
-  const outOfScopeRule = enableOutOfScopeGuardrail
+  const outOfScopeRule = (!isPageIntent && enableOutOfScopeGuardrail)
     ? "- ถ้าคำถามอยู่นอกขอบเขต กยศ/การกู้ยืม/งานนิสิต/ข้อมูลในคลังความรู้ ให้ตอบปฏิเสธสุภาพว่าอยู่นอกขอบเขต"
     : ""
 
   const context = docsForRanking.map(docToText).filter(Boolean).join("\n")
 
-  // --- โค้ดที่เพิ่มใหม่ 3: รวมข้อมูล Facebook เข้าไปใน Context ---
+  // นำข้อมูลหน้าเพจมารวม (ถ้ามี)
   let fbPostsContext = ""
-  if (isPageUpdateIntent(userQuestion)) {
+  if (isPageIntent) {
     fbPostsContext = await fetchFacebookPagePosts()
   }
   const finalContext = [context, fbPostsContext].filter(Boolean).join("\n\n")
-  // --------------------------------------------------------
 
   const recentHistory = safeHistory
     .slice(-6)
     .map((turn) => `${turn.role === "user" ? "ผู้ใช้" : "ผู้ช่วย"}: ${turn.text}`)
     .join("\n")
+
+  const fbInstruction = isPageIntent 
+    ? "- สำคัญมาก: ผู้ใช้กำลังถามถึงหน้าเพจ ให้คุณนำ [ข้อมูลอัปเดตเรียลไทม์จากหน้าเพจ Facebook] มาสรุปตอบให้ครบถ้วนที่สุด ถ้ามีระบบแจ้ง Error ให้พิมพ์บอก Error นั้นตรงๆ เลย" 
+    : ""
 
   const prompt = `
 คุณคือผู้ช่วย AI ที่คุยเหมือนแชทธรรมชาติ
@@ -562,6 +584,7 @@ export async function POST(req: Request) {
 กฎการตอบ
 - ถ้าผู้ใช้ทักทาย ให้ตอบทักทาย
 ${outOfScopeRule}
+${fbInstruction}
 - โทนการตอบต้องเป็นมิตร สุภาพ และช่วยผู้ใช้ไปต่อได้เสมอ
 - ใช้สรรพนามผู้ช่วยเพศชาย และลงท้ายด้วย "ครับ" อย่างสม่ำเสมอ
 - หลีกเลี่ยงประโยคปัดสั้นๆ เช่น "ไม่มีข้อมูลที่ match ได้เลย"
@@ -596,16 +619,16 @@ ${userQuestion}
     for (const model of geminiModels) {
       try {
         const answer = await withTimeout(generateWithModel(geminiApiKey, model, prompt), geminiTimeoutMs, `gemini/${model}`)
-        const finalAnswerRaw = answerMode === "strict" && canLockAnswer ? makeDirectAnswerNatural(userQuestion, directAnswer) : answer
+        const finalAnswerRaw = answerMode === "strict" && canLockAnswer && !isPageIntent ? makeDirectAnswerNatural(userQuestion, directAnswer) : answer
         const finalAnswer = enforceMaleTone(finalAnswerRaw)
         const payload: ChatApiSuccessPayload = {
           answer: finalAnswer,
           contextMatches: docs.length,
           fallbackUsed: false,
-          fallbackReason: answerMode === "strict" && canLockAnswer ? "locked-rag-answer" : "none",
+          fallbackReason: answerMode === "strict" && canLockAnswer && !isPageIntent ? "locked-rag-answer" : "none",
           model
         }
-        if (cacheEnabled) {
+        if (cacheEnabled && !isPageIntent) {
           chatResponseCache.set(cacheKey, payload, cacheTtlMs)
         }
         return Response.json({ ...payload, cacheHit: false })
@@ -623,19 +646,18 @@ ${userQuestion}
 
   if ((shouldUseZaiFallback || shouldUseZaiPrimary) && zaiApiKey) {
     try {
-      // Give z.ai full timeout budget from config, independent of Gemini elapsed time.
       const answer = await generateWithZai(zaiApiKey, "glm-4.7-flash", prompt)
-      const finalAnswerRaw = answerMode === "strict" && canLockAnswer ? makeDirectAnswerNatural(userQuestion, directAnswer) : answer
+      const finalAnswerRaw = answerMode === "strict" && canLockAnswer && !isPageIntent ? makeDirectAnswerNatural(userQuestion, directAnswer) : answer
       const finalAnswer = enforceMaleTone(finalAnswerRaw)
       const fallbackReason = shouldUseZaiPrimary ? "zai-primary" : "gemini-failed"
       const payload: ChatApiSuccessPayload = {
         answer: finalAnswer,
         contextMatches: docs.length,
         fallbackUsed: Boolean(geminiApiKey),
-        fallbackReason: answerMode === "strict" && canLockAnswer ? "locked-rag-answer" : fallbackReason,
+        fallbackReason: answerMode === "strict" && canLockAnswer && !isPageIntent ? "locked-rag-answer" : fallbackReason,
         model: "glm-4.7-flash"
       }
-      if (cacheEnabled) {
+      if (cacheEnabled && !isPageIntent) {
         chatResponseCache.set(cacheKey, payload, cacheTtlMs)
       }
       return Response.json({ ...payload, cacheHit: false })
@@ -664,6 +686,5 @@ ${userQuestion}
     fallbackReason: finalFallbackReason,
     model: "context-fallback"
   }
-  // Avoid caching context-only fallback to reduce stale/low-quality repeats.
   return Response.json({ ...fallbackPayload, cacheHit: false })
 }
