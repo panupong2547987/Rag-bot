@@ -333,7 +333,11 @@ async function fetchFacebookPagePosts() {
 
 export async function POST(req: Request) {
   const { question, history, mode } = (await req.json()) as { question?: string; history?: ChatTurn[]; mode?: AnswerMode }
-  const userQuestion = (question ?? "").trim()
+  
+  // จุดแก้ที่ 1: ดักแปลงคำย่อ "ปี 69" ให้เป็น "ปี 2569" เพื่อให้ระบบ Vector Search และ Keyword ค้นหาเจอ
+  let userQuestion = (question ?? "").trim()
+  userQuestion = userQuestion.replace(/ปี\s?68/g, "ปี 2568").replace(/ปี\s?69/g, "ปี 2569").replace(/ปี\s?70/g, "ปี 2570")
+
   const safeHistory = history ?? []
   const retrievalQuery = buildRetrievalQuery(userQuestion, safeHistory)
   const chatScope = req.headers.get("x-chat-scope") === "user" ? "user" : "guest"
@@ -385,11 +389,11 @@ export async function POST(req: Request) {
 
   const embedding = await getEmbedding(retrievalQuery)
 
-  // Multi-step retrieval ของคุณแบบดั้งเดิม
+  // จุดแก้ที่ 2: ปรับ Threshold ลงเพื่อให้ Vector Search ยืดหยุ่นขึ้นนิดนึง
   const retrievalPlans = [
-    { threshold: 0.68, count: 3 },
-    { threshold: 0.6, count: 5 },
-    { threshold: 0.52, count: 8 }
+    { threshold: 0.65, count: 3 },
+    { threshold: 0.55, count: 5 },
+    { threshold: 0.40, count: 8 }
   ]
 
   let docs: MatchedDoc[] = []
@@ -412,7 +416,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // Keyword fallback ของคุณแบบดั้งเดิม
+  // Keyword fallback
   if (docs.length === 0) {
     const terms = uniqueTokens(retrievalQuery).filter((term) => term.length >= 2).slice(0, 6)
     if (terms.length > 0) {
