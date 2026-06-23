@@ -30,7 +30,6 @@ import {
 } from "@/app/lib/chat-memory"
 import type { ChatMessage } from "@/app/lib/chat-types"
 import { deriveConversationTitle, isAutoTitleCandidate } from "@/app/lib/conversation-title"
-import { buildDynamicQuickQuestions, STATIC_QUICK_QUESTIONS } from "@/app/lib/quick-questions"
 
 const ERROR_MESSAGE = "ไม่สามารถเชื่อมต่อระบบได้ กรุณาลองใหม่อีกครั้ง"
 
@@ -54,6 +53,14 @@ function makeMessage(role: ChatMessage["role"], text: string): ChatMessage {
     createdAt: new Date().toISOString()
   }
 }
+
+// --- ชุดคำถามตายตัวที่เรากำหนดเอง ---
+const CUSTOM_STATIC_QUESTIONS = [
+  "เอกสารที่ต้องใช้สำหรับผู้กู้รายใหม่มีอะไรบ้าง / รายใหม่ใช้เอกสารอะไรบ้าง",
+  "เอกสารที่ต้องใช้สำหรับผู้กู้รายเก่า / รายเก่าใช้เอกสารอะไรบ้าง",
+  "การกรอกแบบคำขอกู้ยืมเงิน กยศ. 101 ต้องระบุข้อมูลอะไรบ้างและมีจุดไหนที่ต้องระวัง"
+]
+// ------------------------------
 
 export default function Page() {
   const [question, setQuestion] = useState("")
@@ -90,11 +97,13 @@ export default function Page() {
     pointerId: -1
   })
 
-  const dynamicQuickQuestions = useMemo(() => buildDynamicQuickQuestions(messages), [messages])
+  // --- กำหนดให้โชว์ปุ่มเฉพาะตอนเริ่มแชทใหม่เท่านั้น ---
   const quickQuestions = useMemo(
-    () => (dynamicQuickQuestions.length > 0 ? dynamicQuickQuestions : messages.length === 0 ? STATIC_QUICK_QUESTIONS : []),
-    [dynamicQuickQuestions, messages.length]
+    () => (messages.length === 0 ? CUSTOM_STATIC_QUESTIONS : []),
+    [messages.length]
   )
+  // ------------------------------------------
+
   const filteredConversations = useMemo(() => {
     const query = sidebarQuery.trim().toLowerCase()
     if (!query) return conversations
@@ -684,8 +693,9 @@ export default function Page() {
                 </div>
                 <div className="brand-copy">
                   <p className="chat-kicker">มหาวิทยาลัยพะเยา</p>
-                  <h1>ผู้ช่วย AI มหาวิทยาลัยพะเยา</h1>
-                  <p className="chat-subtitle">ตอบคำถามด้านการศึกษา กฎระเบียบ และข้อมูลภายในมหาวิทยาลัยจากแหล่งข้อมูลที่กำหนด</p>
+                  {/* --- ปรับชื่อและคำอธิบาย --- */}
+                  <h1>UPChat: ผู้ช่วย AI งานทะเบียนและ กยศ.</h1>
+                  <p className="chat-subtitle">สอบถามข้อมูลปฏิทินการศึกษา ขั้นตอนการกู้ยืม กยศ. (รายใหม่/รายเก่า) และการลงทะเบียนเรียน</p>
                 </div>
               </div>
               <div className="header-meta">
@@ -750,7 +760,7 @@ export default function Page() {
           </div>
 
           <div className="quick-questions-row">
-            {quickQuestionsVisible ? (
+            {quickQuestionsVisible && quickQuestions.length > 0 ? (
               <section
                 ref={quickQuestionsRef}
                 className={`quick-questions quick-questions-bottom ${isQuickDragging ? "is-dragging" : ""}`}
@@ -776,17 +786,19 @@ export default function Page() {
               </section>
             ) : null}
 
-            <div className="quick-questions-control">
-              <button
-                type="button"
-                className="quick-toggle-button"
-                aria-label={quickQuestionsVisible ? "ซ่อนคำถามแนะนำ" : "แสดงคำถามแนะนำ"}
-                title={quickQuestionsVisible ? "ซ่อนคำถามแนะนำ" : "แสดงคำถามแนะนำ"}
-                onClick={() => setQuickQuestionsVisible((prev) => !prev)}
-              >
-                {quickQuestionsVisible ? <X size={14} /> : <Plus size={14} />}
-              </button>
-            </div>
+            {quickQuestions.length > 0 ? (
+              <div className="quick-questions-control">
+                <button
+                  type="button"
+                  className="quick-toggle-button"
+                  aria-label={quickQuestionsVisible ? "ซ่อนคำถามแนะนำ" : "แสดงคำถามแนะนำ"}
+                  title={quickQuestionsVisible ? "ซ่อนคำถามแนะนำ" : "แสดงคำถามแนะนำ"}
+                  onClick={() => setQuickQuestionsVisible((prev) => !prev)}
+                >
+                  {quickQuestionsVisible ? <X size={14} /> : <Plus size={14} />}
+                </button>
+              </div>
+            ) : null}
           </div>
 
           <ChatComposer value={question} disabled={isLoading} onChange={setQuestion} onSubmit={() => ask()} />
