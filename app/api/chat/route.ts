@@ -334,7 +334,7 @@ async function fetchFacebookPagePosts() {
 export async function POST(req: Request) {
   const { question, history, mode } = (await req.json()) as { question?: string; history?: ChatTurn[]; mode?: AnswerMode }
   
-  // จุดแก้ที่ 1: ดักแปลงคำย่อ "ปี 69" ให้เป็น "ปี 2569" เพื่อให้ระบบ Vector Search และ Keyword ค้นหาเจอ
+  // แปลงคำย่อ "ปี 69" ให้เป็น "ปี 2569" เพื่อให้ระบบ Vector Search และ Keyword ค้นหาเจอ
   let userQuestion = (question ?? "").trim()
   userQuestion = userQuestion.replace(/ปี\s?68/g, "ปี 2568").replace(/ปี\s?69/g, "ปี 2569").replace(/ปี\s?70/g, "ปี 2570")
 
@@ -389,7 +389,6 @@ export async function POST(req: Request) {
 
   const embedding = await getEmbedding(retrievalQuery)
 
-  // จุดแก้ที่ 2: ปรับ Threshold ลงเพื่อให้ Vector Search ยืดหยุ่นขึ้นนิดนึง
   const retrievalPlans = [
     { threshold: 0.65, count: 3 },
     { threshold: 0.55, count: 5 },
@@ -457,7 +456,10 @@ export async function POST(req: Request) {
   const directAnswerThreshold = Number(process.env.RAG_DIRECT_ANSWER_SIMILARITY ?? 0.75)
   const directAnswer = extractAnswerFromContent(topDoc?.content)
   const lockedAnswerThreshold = Number(process.env.RAG_LOCK_ANSWER_SIMILARITY ?? 0.65)
-  const strictMinSimilarity = Number(process.env.RAG_STRICT_MIN_SIMILARITY ?? 0.62)
+  
+  // *** ปรับเกณฑ์ตรงนี้เป็น 0.50 เพื่อให้ข้อมูลหลุดไปถึง AI มากขึ้น ***
+  const strictMinSimilarity = Number(process.env.RAG_STRICT_MIN_SIMILARITY ?? 0.50)
+  
   const lexicalMin = Number(process.env.RAG_LOCK_LEXICAL_MIN ?? 0.25)
   const similarityGapMin = Number(process.env.RAG_LOCK_GAP_MIN ?? 0.04)
   const topQuestionText = extractQuestionFromContent(topDoc?.content)
@@ -582,23 +584,26 @@ export async function POST(req: Request) {
     ? "- สำคัญมาก: ผู้ใช้กำลังถามถึงหน้าเพจ ให้คุณนำ [ข้อมูลอัปเดตเรียลไทม์จากหน้าเพจ Facebook] มาสรุปตอบให้ครบถ้วนที่สุด ถ้ามีระบบแจ้ง Error ให้พิมพ์บอก Error นั้นตรงๆ เลย" 
     : ""
 
-  // --- เพิ่มส่วนคำนวณวันที่ปัจจุบัน (พ.ศ. ไทย) สำหรับข้อ 3 ---
+  // คำนวณวันที่ปัจจุบัน
   const today = new Date()
   const currentDateTH = today.toLocaleDateString("th-TH", {
     year: "numeric",
     month: "long",
     day: "numeric"
   })
-  const currentYearTH = today.getFullYear() + 543 // ดึงปี พ.ศ. ปัจจุบันออกมา
-  // -----------------------------------------------------
+  const currentYearTH = today.getFullYear() + 543
 
+  // *** อัปเดต Prompt สั่งให้แยกปี 68 และ 69 ให้ชัดเจน ***
   const prompt = `
 คุณคือผู้ช่วย AI ที่คุยเหมือนแชทธรรมชาติ
 
 กฎการตอบ
 - [สำคัญมาก] วันนี้คือวันที่ ${currentDateTH} (ปีปัจจุบันคือ ${currentYearTH})
-- หากผู้ใช้ถามคำถามเกี่ยวกับกำหนดการแบบกำกวมโดยไม่ระบุปี (เช่น "เปิดเทอมวันไหน", "ลงทะเบียนวันไหน") ให้คุณยึดข้อมูลของ "ปีปัจจุบัน (${currentYearTH})" เป็นหลักในการตอบคำถามเสมอ
-- ให้ตรวจสอบ "ข้อมูลอ้างอิง" หากพบว่ามีข้อมูลกำหนดการของปีอื่นๆ ด้วย (เช่น ข้อมูลปี 2568, 2570) ให้แจ้งต่อท้ายคำตอบเสมอว่า "นอกจากนี้ ระบบยังมีข้อมูลของปีการศึกษา [ระบุปีที่พบ] ด้วยครับ หากต้องการทราบสามารถพิมพ์ระบุปีมาได้เลย"
+- หากผู้ใช้ถามคำถามแบบกำกวมโดยไม่ระบุปี ให้ตรวจสอบ "ข้อมูลอ้างอิง" ก่อน หากพบข้อมูลของหลายปีการศึกษา (เช่น 2568 และ 2569) ให้คุณสรุปคำตอบโดยแยกเป็นรายปีให้ชัดเจน ตัวอย่างเช่น:
+  "ระบบพบข้อมูลของปี 2568 และ 2569 ดังนี้ครับ:
+  - **ปี 2568:** [สรุปกำหนดการของปี 68]
+  - **ปี 2569:** [สรุปกำหนดการของปี 69]
+  หากต้องการให้ผมช่วยดูรายละเอียดของปีไหนเป็นพิเศษ พิมพ์ระบุปีบอกผมได้เลยครับ"
 - ถ้าผู้ใช้ทักทาย ให้ตอบทักทาย
 ${outOfScopeRule}
 ${fbInstruction}
