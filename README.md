@@ -27,7 +27,7 @@ npm install
 
 ```env
 GEMINI_API_KEY=...
-GEMINI_MODEL_CHAIN=gemini-2.5-flash,gemma-3-27b-it
+GEMINI_MODEL_CHAIN=gemini-2.5-flash
 ZAI_API_KEY=...
 MODEL_TIMEOUT_MS=6000
 LLM_MAX_LATENCY_MS=8000

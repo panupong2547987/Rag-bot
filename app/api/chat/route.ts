@@ -251,7 +251,7 @@ function matchesConstraints(content: string | undefined, constraints: QueryConst
 function parseGeminiModelChain() {
   const raw = process.env.GEMINI_MODEL_CHAIN?.trim()
   if (!raw) {
-    return ["gemini-2.5-flash", "gemma-3-27b-it"] as const
+    return ["gemini-2.5-flash"] as const
   }
 
   const chain = raw
@@ -259,7 +259,7 @@ function parseGeminiModelChain() {
     .map((item) => item.trim())
     .filter(Boolean)
 
-  return (chain.length ? chain : ["gemini-2.5-flash", "gemma-3-27b-it"]) as readonly string[]
+  return (chain.length ? chain : ["gemini-2.5-flash"]) as readonly string[]
 }
 
 function isFollowUpQuestion(text: string) {
