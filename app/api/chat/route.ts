@@ -566,7 +566,16 @@ export async function POST(req: Request) {
     ? "- ถ้าคำถามอยู่นอกขอบเขต กยศ/การกู้ยืม/งานนิสิต/ข้อมูลในคลังความรู้ ให้ตอบปฏิเสธสุภาพว่าอยู่นอกขอบเขต"
     : ""
 
-  const context = docsForRanking.map(docToText).filter(Boolean).join("\n")
+  const grouped = Object.groupBy(docsForRanking, d => d.year ?? "unknown")
+
+const context = Object.entries(grouped)
+  .map(([year, items]) => {
+    return `
+=== ปี ${year} ===
+${items.map(docToText).join("\n")}
+`
+  })
+  .join("\n")
 
   // นำข้อมูลหน้าเพจมารวม (ถ้ามี)
   let fbPostsContext = ""
