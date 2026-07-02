@@ -43,7 +43,7 @@ alter table documents drop column if exists answer;
 create or replace function match_documents(
   query_embedding vector(1024),
   match_threshold float default 0.7,
-  match_count int default 3
+  match_count int default 10
 )
 returns table (
   id bigint,
