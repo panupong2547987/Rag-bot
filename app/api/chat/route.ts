@@ -567,10 +567,11 @@ export async function POST(req: Request) {
     : ""
 
   const context = docsForRanking
+  .slice(0, 5)
   .map(docToText)
   .filter(Boolean)
   .join("\n")
-
+  
   // นำข้อมูลหน้าเพจมารวม (ถ้ามี)
   let fbPostsContext = ""
   if (isPageIntent) {
