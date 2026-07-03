@@ -583,6 +583,9 @@ export async function POST(req: Request) {
   }
   const finalContext = [context, fbPostsContext].filter(Boolean).join("\n\n")
 
+  console.log("FINAL CONTEXT")
+  console.log(finalContext)
+
   const recentHistory = safeHistory
     .slice(-6)
     .map((turn) => `${turn.role === "user" ? "ผู้ใช้" : "ผู้ช่วย"}: ${turn.text}`)
