@@ -662,7 +662,7 @@ ${userQuestion}
   const errors: unknown[] = []
   let geminiFailed = false
   let geminiSawRateLimit = false
-  const geminiTimeoutMs = Number(process.env.MODEL_TIMEOUT_MS ?? 6000)
+  const geminiTimeoutMs = Number(process.env.MODEL_TIMEOUT_MS ?? 30000)
 
   if (geminiApiKey) {
     const geminiModels = parseGeminiModelChain()
