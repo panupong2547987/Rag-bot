@@ -567,7 +567,7 @@ export async function POST(req: Request) {
     : ""
 
   const context = docsForRanking
-  .slice(0, 8)
+  .slice(0, 6)
   .map(docToText)
   .filter(Boolean)
   .join("\n")
