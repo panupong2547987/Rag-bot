@@ -409,6 +409,10 @@ export async function POST(req: Request) {
     }
 
     const rows = (attempt.data ?? []) as MatchedDoc[]
+    
+    console.log("MATCHED DOCS")
+    console.log(JSON.stringify(rows, null, 2))
+    
     if (rows.length > 0) {
       docs = rows
       break
